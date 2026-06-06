@@ -58,6 +58,10 @@ export class ToneScanner {
   // A block counts as carrying signal when its strongest bin is at least this
   // many times the median bin power (see finishBlock).
   private readonly signalPeakRatio = 6
+  // Numerical floor so the peakiness test never degenerates to `bestPower > 0`
+  // when the median bin power is exactly 0 (near-digital-silence): float dust must
+  // not read as a tone. Far below any real audio (a -100 dBFS tone is ~1e-11).
+  private readonly minSignalPower = 1e-12
 
   constructor(opts: ToneScannerOptions) {
     const min = opts.minFreq ?? 400
@@ -108,12 +112,17 @@ export class ToneScanner {
     for (let i = 0; i < powers.length; i++) scratch[i] = powers[i]
     scratch.sort((a, b) => a - b)
     const median = scratch[scratch.length >> 1]
-    const hasSignal = bestPower > median * this.signalPeakRatio
+    const hasSignal = bestPower > Math.max(median * this.signalPeakRatio, this.minSignalPower)
 
     if (hasSignal) {
       if (this.lastWinner >= 0 && Math.abs(bestIdx - this.lastWinner) <= 1) {
         this.winnerStreak++
-        this.lastWinner = bestIdx // drift toward current strongest bin
+        // Keep lastWinner fixed as the streak's ANCHOR — do NOT drift it to the
+        // current bin. Drifting let a slowly-wandering peak (idx 5,6,7,8...) keep
+        // the streak alive across many different frequencies and lock onto a tone
+        // that never existed at any single bin. A real tone sits within ±1 bin of
+        // its anchor, so the streak still builds; coherent noise walking >1 bin
+        // away resets it.
       } else {
         this.lastWinner = bestIdx
         this.winnerStreak = 1

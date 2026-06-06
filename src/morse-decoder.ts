@@ -84,14 +84,15 @@ export class MorseDecoder {
     this.runBlocks = 1
   }
 
-  /** Call when audio stops, to flush any buffered letter. */
+  /** Call when audio stops, to flush any buffered letter and reset run state. */
   flush(): void {
-    if (this.toneActive) {
-      this.finishRun(true, this.runBlocks)
-      this.toneActive = false
-      this.runBlocks = 0
-    }
+    if (this.toneActive) this.finishRun(true, this.runBlocks)
     this.emitLetter()
+    // Always clear the run accounting, even if we were mid-OFF-run, so a later
+    // resume (start after stop, without a double-press) doesn't continue counting
+    // a stale gap into its first measurement.
+    this.toneActive = false
+    this.runBlocks = 0
   }
 
   private finishRun(wasTone: boolean, lengthBlocks: number): void {

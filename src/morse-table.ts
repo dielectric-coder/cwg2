@@ -21,6 +21,14 @@ const MORSE_TO_CHAR: Record<string, string> = {
 }
 
 /**
+ * Inverse of the table: character -> dot/dash sequence. Single source of truth for
+ * the alphabet, so tests/synthesis don't hand-maintain their own copies.
+ */
+export const CHAR_TO_MORSE: Record<string, string> = Object.fromEntries(
+  Object.entries(MORSE_TO_CHAR).map(([sym, ch]) => [ch, sym]),
+)
+
+/**
  * Translate a dot/dash sequence to a character.
  * Returns "?" for sequences not in the table (e.g. garbled input).
  */

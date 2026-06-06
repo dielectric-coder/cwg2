@@ -22,16 +22,8 @@
  * No test framework: tiny assert harness, non-zero exit on any failure.
  */
 
-import { MorseDecoder } from './morse-decoder'
-import { ToneScanner } from './tone-scanner'
-
-const SAMPLE_RATE = 16000
-const BLOCK_SAMPLES = 160
-const BLOCKS_PER_SECOND = SAMPLE_RATE / BLOCK_SAMPLES // 100
-
-const MORSE: Record<string, string> = {
-  P: '.--.', A: '.-', R: '.-.', I: '..', S: '...', O: '---', N: '-.', T: '-',
-}
+import { CwPipeline, SAMPLE_RATE, BLOCK_SAMPLES, BLOCKS_PER_SECOND } from './pipeline'
+import { CHAR_TO_MORSE } from './morse-table'
 
 /** Deterministic PRNG so tests are reproducible (no Math.random flakiness). */
 function makeRng(seed: number): () => number {
@@ -55,7 +47,7 @@ function keySamples(text: string, wpm: number): Uint8Array {
       push(7, 0)
       continue
     }
-    const sym = MORSE[ch]
+    const sym = CHAR_TO_MORSE[ch]
     for (let k = 0; k < sym.length; k++) {
       push(sym[k] === '-' ? 3 : 1, 1)
       if (k < sym.length - 1) push(1, 0)
@@ -109,48 +101,24 @@ function buildSamples(
   return out
 }
 
-/** Run the full main.ts capture pipeline over a sample stream and report outcome. */
+/**
+ * Decode a sample stream through the REAL shared pipeline (CwPipeline), feeding it
+ * one block at a time so we can observe the lock timing — so this test exercises
+ * exactly what main.ts runs.
+ */
 function decodeStream(samples: number[]): Outcome {
-  const scanner = new ToneScanner({ sampleRate: SAMPLE_RATE, minFreq: 550, maxFreq: 950, stepFreq: 25 })
   let decoded = ''
-  const decoder = new MorseDecoder({
-    blocksPerSecond: BLOCKS_PER_SECOND,
-    initialWpm: 15,
-    onChar: (c) => (decoded += c),
-  })
-  let block = 0, lockBlock = -1, lockFreq: number | null = null, maxWpm = 0
-  let peakPower = 1e-9, idleBlocks = 0
-  const MAX_IDLE_BLOCKS = BLOCKS_PER_SECOND * 2.5
-  const onHistory: boolean[] = []
-  const buf: number[] = []
-  for (let i = 0; i < samples.length; i++) {
-    buf.push(samples[i])
-    if (buf.length >= BLOCK_SAMPLES) {
-      for (const s of buf) scanner.process(s)
-      const res = scanner.finishBlock()
-      buf.length = 0
-      // Mirror main.ts: amplitude on/off with hasSignal-gated threshold + idle gate.
-      if (res.hasSignal) { peakPower = Math.max(res.power, peakPower * 0.999); idleBlocks = 0 }
-      else { peakPower *= 0.999; idleBlocks++ }
-      const rawOn = res.power > peakPower * 0.25
-      onHistory.push(rawOn)
-      if (onHistory.length > 3) onHistory.shift()
-      const on = onHistory.filter(Boolean).length >= 2
-      if (res.lockedFreq !== null) {
-        if (lockBlock < 0) { lockBlock = block; lockFreq = res.lockedFreq }
-        if (idleBlocks <= MAX_IDLE_BLOCKS) {
-          decoder.pushBlock(on)
-          maxWpm = Math.max(maxWpm, decoder.estimatedWpm)
-        } else if (idleBlocks === MAX_IDLE_BLOCKS + 1) {
-          decoder.flush()
-        }
-      }
-      block++
-    }
+  const pipe = new CwPipeline({ onChar: (c) => (decoded += c) })
+  let lockBlock = -1, maxWpm = 0
+  const nBlocks = Math.floor(samples.length / BLOCK_SAMPLES)
+  for (let b = 0; b < nBlocks; b++) {
+    pipe.pushSamples(samples.slice(b * BLOCK_SAMPLES, (b + 1) * BLOCK_SAMPLES))
+    if (lockBlock < 0 && pipe.lockedFreq !== null) lockBlock = b
+    maxWpm = Math.max(maxWpm, pipe.estimatedWpm)
   }
   return {
     lockSeconds: lockBlock < 0 ? null : lockBlock / BLOCKS_PER_SECOND,
-    lockFreq, maxWpm, finalWpm: decoder.estimatedWpm, decoded,
+    lockFreq: pipe.lockedFreq, maxWpm, finalWpm: pipe.estimatedWpm, decoded,
   }
 }
 
@@ -221,6 +189,24 @@ console.log('\n# Robustness')
   assert(tail6s.decoded === tail3s.decoded,
     'noise past the idle point adds no spurious characters',
     `3s=${JSON.stringify(tail3s.decoded)} 6s=${JSON.stringify(tail6s.decoded)}`)
+}
+
+// --- #3: a second session after resetCapture() (stop then start) is clean ---
+// resetCapture clears the partial sample block, debounce history and threshold so
+// a fresh session never inherits stale data from the previous one.
+{
+  let decoded = ''
+  const pipe = new CwPipeline({ onChar: (c) => (decoded += c) })
+  const feedBlocks = (s: number[], n?: number) => {
+    const total = n ?? Math.floor(s.length / BLOCK_SAMPLES)
+    for (let b = 0; b < total; b++) pipe.pushSamples(s.slice(b * BLOCK_SAMPLES, (b + 1) * BLOCK_SAMPLES))
+  }
+  feedBlocks(buildSamples('PARIS PARIS', WPM, FREQ, 20, 'brown', 11), 200) // session A, fed partway
+  pipe.resetCapture() // "stop then start"
+  decoded = ''
+  feedBlocks(buildSamples('PARIS PARIS PARIS', WPM, FREQ, 8, 'brown', 22)) // session B, quieter, fresh
+  console.log(`-- second session: "${decoded.trim()}"`)
+  assert(decoded.includes('PARIS'), 'a second session after resetCapture decodes cleanly', `got "${decoded.trim()}"`)
 }
 
 console.log(`\n${failures === 0 ? 'ALL TUNING TESTS PASSED' : `${failures} TUNING TEST(S) FAILED`}`)

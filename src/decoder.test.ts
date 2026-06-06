@@ -16,21 +16,8 @@
 
 import { MorseDecoder } from './morse-decoder'
 import { ToneScanner } from './tone-scanner'
-
-// --- Same constants as main.ts ---
-const SAMPLE_RATE = 16000
-const BLOCK_SAMPLES = 160
-const BLOCKS_PER_SECOND = SAMPLE_RATE / BLOCK_SAMPLES // 100
-
-// "." dot = 1 unit on, "-" dash = 3 units on. Only the letters used in tests.
-const CHAR_TO_MORSE: Record<string, string> = {
-  A: '.-', B: '-...', C: '-.-.', D: '-..', E: '.', F: '..-.', G: '--.',
-  H: '....', I: '..', J: '.---', K: '-.-', L: '.-..', M: '--', N: '-.',
-  O: '---', P: '.--.', Q: '--.-', R: '.-.', S: '...', T: '-', U: '..-',
-  V: '...-', W: '.--', X: '-..-', Y: '-.--', Z: '--..',
-  '0': '-----', '1': '.----', '2': '..---', '3': '...--', '4': '....-',
-  '5': '.....', '6': '-....', '7': '--...', '8': '---..', '9': '----.',
-}
+import { SAMPLE_RATE, BLOCK_SAMPLES, BLOCKS_PER_SECOND } from './pipeline'
+import { CHAR_TO_MORSE } from './morse-table'
 
 /**
  * Turn text into a stream of per-block tone on/off booleans using standard
@@ -103,7 +90,12 @@ function synthAudio(blocks: boolean[], freq: number): number[] {
   return samples
 }
 
-/** Run synthesized audio through the exact pipeline main.ts uses. */
+/**
+ * Decode-correctness harness: synthesized audio -> scanner + decoder, decoding
+ * EVERY block (no lock-gate) so exact output can be asserted. The gated end-to-end
+ * pipeline that main.ts runs is exercised separately in tuning.test.ts (CwPipeline).
+ * Uses a 400–1000/50 Hz bank on purpose, to test off-bin interpolation at 675 Hz.
+ */
 function decodeAudio(blocks: boolean[], freq: number): { text: string; lockedFreq: number | null } {
   const scanner = new ToneScanner({ sampleRate: SAMPLE_RATE, minFreq: 400, maxFreq: 1000, stepFreq: 50 })
   let out = ''
@@ -130,10 +122,11 @@ function decodeAudio(blocks: boolean[], freq: number): { text: string; lockedFre
 }
 
 /**
- * A headless stand-in for main.ts: the same scanner + decoder + threshold wiring
- * and the same user-visible state (decodedText / partialSymbol / lockedFreq), so
- * the double-press reset can be exercised without the SDK. The `doublePress`
- * body MUST mirror main.ts's DOUBLE_CLICK_EVENT handler — keep them in sync.
+ * Headless decode/reset harness: scanner + decoder + the visible state
+ * (decodedText / partialSymbol / lockedFreq), decoding every block so the
+ * double-press reset and stop-flush ordering can be asserted exactly without the
+ * SDK. (The full gated pipeline is covered by tuning.test.ts via CwPipeline; the
+ * reset/flush *ordering* mirrored here is the same one CwPipeline.reArm/flush use.)
  */
 function makeApp() {
   let decodedText = ''

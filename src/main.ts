@@ -3,12 +3,10 @@
  * -------
  * The glue layer — the only file that touches the Even Hub SDK.
  *
- * Pipeline:
- *   mic -> pcm16ToFloat -> ToneScanner (auto-finds CW pitch) -> threshold
- *       -> MorseDecoder (timing -> letters) -> display
+ *   mic -> pcm16ToFloat -> CwPipeline (tone detect + decode) -> display
  *
- * Display shows: status + auto-detected pitch, the decoded text, and the
- * in-progress dot/dash symbol live as it builds.
+ * All DSP/decode logic lives in the SDK-free CwPipeline (pipeline.ts); this file
+ * only does audio capture, display, and touch/lifecycle handling.
  *
  * Controls:
  *   - single press  -> start/stop listening
@@ -23,13 +21,7 @@ import {
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 
-import { ToneScanner } from './tone-scanner'
-import { MorseDecoder } from './morse-decoder'
-
-// --- Audio constants (Device APIs: PCM 16kHz, s16le, mono) ---
-const SAMPLE_RATE = 16000
-const BLOCK_SAMPLES = 160 // 10 ms per block -> 100 blocks/sec
-const blocksPerSecond = SAMPLE_RATE / BLOCK_SAMPLES
+import { CwPipeline } from './pipeline'
 
 async function main() {
   const bridge = await waitForEvenAppBridge()
@@ -37,22 +29,43 @@ async function main() {
   let decodedText = ''
   let listening = false
   let partialSymbol = '' // the in-progress dot/dash buffer
-  let lockedFreq: number | null = null
-  let searchingFreq: number | null = null // live peak pitch shown before lock
 
+  const pipeline = new CwPipeline({
+    onChar: (c) => {
+      decodedText += c
+      if (decodedText.length > 120) decodedText = decodedText.slice(-120)
+      scheduleRender()
+    },
+    onProgress: (p) => {
+      partialSymbol = p
+      scheduleRender()
+    },
+  })
+
+  // ---- Display (the only SDK-coupled rendering) ----
   let pageCreated = false
-  async function render() {
-    const pitch = lockedFreq
-      ? `${lockedFreq}Hz`
-      : searchingFreq
-        ? `~${searchingFreq}Hz locking...`
+  let lastContent: string | null = null
+  let renderDirty = false
+  let rendering = false
+
+  function buildContent(): string {
+    const pitch = pipeline.lockedFreq
+      ? `${pipeline.lockedFreq}Hz`
+      : pipeline.searchingFreq
+        ? `~${pipeline.searchingFreq}Hz locking...`
         : 'finding tone...'
     const status = listening
-      ? `LISTENING  ${pitch}  ~${decoder.estimatedWpm}wpm`
+      ? `LISTENING  ${pitch}  ~${pipeline.estimatedWpm}wpm`
       : 'PAUSED (press to start)'
     const body = decodedText.length ? decodedText : '(nothing yet)'
     const live = partialSymbol ? `\n\n> ${partialSymbol}` : ''
-    const content = `${status}\n\n${body}${live}`
+    return `${status}\n\n${body}${live}`
+  }
+
+  async function render() {
+    const content = buildContent()
+    if (content === lastContent) return // skip redundant frames — no bridge round-trip
+    lastContent = content
 
     // The startup page must be created exactly ONCE (SDK: createStartUpPageContainer
     // is the launch call; subsequent frames update text in place). Re-creating the
@@ -78,110 +91,49 @@ async function main() {
     }
   }
 
-  // ---- Detection + decoding ----
-  // Scan the band CW operators actually use (~600–900 Hz) with a little margin
-  // for interpolation headroom. Excluding the low bins keeps the scanner from
-  // false-locking onto low-frequency room rumble, and the 25 Hz step gives a
-  // finer pitch readout than the old 50 Hz bins.
-  const scanner = new ToneScanner({
-    sampleRate: SAMPLE_RATE,
-    minFreq: 550,
-    maxFreq: 950,
-    stepFreq: 25,
-  })
-
-  const decoder = new MorseDecoder({
-    blocksPerSecond,
-    initialWpm: 15,
-    onChar: (c) => {
-      decodedText += c
-      if (decodedText.length > 120) decodedText = decodedText.slice(-120)
-      void render()
-    },
-    onProgress: (p) => {
-      partialSymbol = p
-      void render()
-    },
-  })
-
-  let peakPower = 1e-9
-  let idleBlocks = 0 // consecutive blocks with no tone present (peakiness false)
-  let sampleBuffer: number[] = []
-  const onHistory: boolean[] = [] // last 3 raw on/off decisions, for debouncing
-  // After this many blocks with no real tone, treat the transmission as paused:
-  // flush the final letter and stop feeding, so post-transmission noise isn't
-  // decoded. 2.5 s is well beyond any inter-word gap (a 5 wpm word gap is ~1.7 s).
-  const MAX_IDLE_BLOCKS = blocksPerSecond * 2.5
-
-  /** Clear per-session capture state so a fresh start never inherits stale data. */
-  function resetCapture() {
-    sampleBuffer = []
-    onHistory.length = 0
-    peakPower = 1e-9
-    idleBlocks = 0
+  // Coalesce renders. The decode callbacks fire many times while processing one
+  // audio event (10 blocks/event, multiple element transitions). Deferring to a
+  // microtask collapses the whole burst into a single render of the final state,
+  // and render() skips frames whose content is unchanged — so the display bridge
+  // isn't flooded with redundant round-trips.
+  function scheduleRender(): void {
+    renderDirty = true
+    if (rendering) return
+    rendering = true
+    queueMicrotask(flushRenders)
   }
-
-  function processBlock() {
-    for (const s of sampleBuffer) scanner.process(s)
-    const res = scanner.finishBlock()
-    sampleBuffer = []
-
-    lockedFreq = res.lockedFreq
-    // The on/off decision is amplitude-relative (clean element timing), but the
-    // threshold reference is adapted ONLY from real tone blocks (hasSignal). A loud
-    // non-tone transient (cough/tap) is not spectrally peaky, so it can't ratchet
-    // peakPower up and then suppress real tones for seconds while it decays.
-    if (res.hasSignal) {
-      peakPower = Math.max(res.power, peakPower * 0.999)
-      searchingFreq = res.peakFreq // live pitch readout while still searching
-      idleBlocks = 0
-    } else {
-      peakPower *= 0.999
-      idleBlocks++
-    }
-    const rawOn = res.power > peakPower * 0.25
-
-    // Median-of-3 debounce: drop single-block glitches before the decoder times
-    // them, so a stray on/off blip can't be mistaken for a very fast dot.
-    onHistory.push(rawOn)
-    if (onHistory.length > 3) onHistory.shift()
-    const on = onHistory.filter(Boolean).length >= 2
-
-    // Decode only once locked, and only while a tone has been present recently.
-    // After a sustained absence of any tone (operator stopped) flush the final
-    // letter once and stop feeding — otherwise post-transmission noise that crosses
-    // the threshold would be timed as Morse forever (the lock never releases).
-    if (res.lockedFreq !== null) {
-      if (idleBlocks <= MAX_IDLE_BLOCKS) decoder.pushBlock(on)
-      else if (idleBlocks === MAX_IDLE_BLOCKS + 1) decoder.flush()
+  async function flushRenders(): Promise<void> {
+    try {
+      while (renderDirty) {
+        renderDirty = false
+        await render()
+      }
+    } finally {
+      rendering = false
     }
   }
 
+  // ---- Touch + lifecycle events ----
   // When the app comes to the foreground the host emits a one-time event that is
   // byte-identical to a click (bare `sysEvent`, eventSource set, eventType
-  // omitted). We can't tell it apart from a real tap, so we ignore bare
-  // sysEvents during a short grace window after wiring up — long enough to swallow
-  // the launch event, short enough that a real user tap (always seconds later)
-  // still registers. Without this the app auto-starts itself on launch.
+  // omitted). We can't tell it apart from a real tap, so we ignore bare sysEvents
+  // during a short grace window after wiring up — long enough to swallow the launch
+  // event, short enough that a real user tap (always seconds later) still registers.
   const readyAt = Date.now()
   const STARTUP_GRACE_MS = 1200
 
   bridge.onEvenHubEvent((event: any) => {
-    // Audio path
+    // Audio path. Payload field is audioEvent.audioPcm (s16le PCM as number[] or
+    // base64 over the JSON bridge), not .data.
     if (event.audioEvent && listening) {
-      const samples = pcm16ToFloat(event.audioEvent.audioPcm ?? event.audioEvent.data)
-      for (const s of samples) {
-        sampleBuffer.push(s)
-        if (sampleBuffer.length >= BLOCK_SAMPLES) processBlock()
-      }
+      pipeline.pushSamples(pcm16ToFloat(event.audioEvent.audioPcm ?? event.audioEvent.data))
       return
     }
 
-    // Touch + lifecycle path. The host delivers a click as a bare `sysEvent`
-    // (eventSource set, eventType omitted = proto default 0 = CLICK), scroll
-    // up/down as `textEvent` (eventType 1/2), and double-click / exit as
-    // `sysEvent` with eventType 3 / 5-7. Read eventType from whichever envelope
-    // is present and normalize it.
+    // Touch + lifecycle. The host delivers a click as a bare `sysEvent` (eventType
+    // omitted = proto default 0 = CLICK), scroll up/down as `textEvent` (1/2), and
+    // double-click / exit as `sysEvent` with eventType 3 / 5-7. Read eventType from
+    // whichever envelope is present and normalize it.
     const item = event.sysEvent ?? event.textEvent
     if (!item) return
     const evt = OsEventTypeList.fromJson(item.eventType)
@@ -194,17 +146,13 @@ async function main() {
         void toggleListening()
         break
       case OsEventTypeList.DOUBLE_CLICK_EVENT:
-        // Reset the engine first — flush() emits any pending letter via onChar,
-        // so the buffers must be cleared AFTER it, or that letter lands back in
-        // decodedText.
-        decoder.flush()
-        scanner.resetLock() // re-arm auto detection
+        // reArm() flushes the pending letter (via onChar) then drops the lock and
+        // capture state; clear our text buffers AFTER, so the flushed letter that
+        // just landed in decodedText is wiped too.
+        pipeline.reArm()
         decodedText = ''
         partialSymbol = ''
-        lockedFreq = null
-        searchingFreq = null
-        resetCapture()
-        void render()
+        scheduleRender()
         break
       case OsEventTypeList.FOREGROUND_EXIT_EVENT:
       case OsEventTypeList.ABNORMAL_EXIT_EVENT:
@@ -221,20 +169,20 @@ async function main() {
   }
 
   async function startListening() {
-    resetCapture() // start each session from a clean slate (no stale buffers)
+    pipeline.resetCapture() // start each session from a clean slate (no stale state)
     listening = true
     await bridge.audioControl(true)
-    await render()
+    scheduleRender()
   }
 
   async function stopListening() {
     listening = false
     await bridge.audioControl(false)
-    decoder.flush()
-    await render()
+    pipeline.flush()
+    scheduleRender()
   }
 
-  await render()
+  await render() // initial paint creates the page
 }
 
 /** Convert signed-16-bit little-endian PCM bytes to floats in ~-1..1. */
@@ -257,4 +205,3 @@ function pcm16ToFloat(data: ArrayBuffer | Uint8Array | number[] | string): numbe
 }
 
 main()
-
