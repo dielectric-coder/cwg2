@@ -310,6 +310,26 @@ assertNear(r600.lockedFreq, 600, 30, 'auto-locks ~600 Hz')
   assertNear(app.get().lockedFreq, 850, 30, 're-locks on the new pitch after a silent re-arm')
 }
 
+// --- Tests: word-gap spacing (no stray leading/empty-content space) ---
+// A word gap (>=5 units OFF) must emit a space only when a letter actually
+// precedes it — never a leading space, never a doubled space.
+{
+  const decodeRuns = (runs: Array<[boolean, number]>): string => {
+    let out = ''
+    const d = new MorseDecoder({ blocksPerSecond: BLOCKS_PER_SECOND, initialWpm: 15, onChar: (c) => (out += c) })
+    for (const [on, n] of runs) for (let i = 0; i < n; i++) d.pushBlock(on)
+    d.flush()
+    return out
+  }
+  const U = UNIT_15WPM
+  assertEqual(decodeRuns([[false, 7 * U], [true, U]]), 'E',
+    'a word gap before any letter does NOT emit a leading space')
+  assertEqual(decodeRuns([[true, U], [false, 7 * U], [true, U]]), 'E E',
+    'a word gap between letters emits exactly one space')
+  assertEqual(decodeRuns([[true, U], [false, 3 * U], [true, U]]), 'EE',
+    'a letter gap emits no space')
+}
+
 // --- Summary ---
 console.log(`\n${failures === 0 ? 'ALL TESTS PASSED' : `${failures} TEST(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

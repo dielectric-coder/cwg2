@@ -14,6 +14,8 @@
 
 export class Goertzel {
   private coeff: number
+  private cosOmega: number
+  private sinOmega: number
   private q0 = 0
   private q1 = 0
   private q2 = 0
@@ -23,13 +25,14 @@ export class Goertzel {
    * @param targetFreq  the tone frequency to detect, in Hz (e.g. 700)
    * @param sampleRate  audio sample rate, in Hz (16000 for the G2 mic)
    */
-  constructor(
-    private targetFreq: number,
-    private sampleRate: number,
-  ) {
-    // Precompute the filter coefficient for the target frequency.
+  constructor(targetFreq: number, sampleRate: number) {
+    // Precompute the filter coefficient and the cos/sin of the target frequency
+    // once — these never change, so power() reuses them instead of recomputing a
+    // cos and a sin on every call (this runs once per bin per block, ~1.7k/sec).
     const omega = (2 * Math.PI * targetFreq) / sampleRate
-    this.coeff = 2 * Math.cos(omega)
+    this.cosOmega = Math.cos(omega)
+    this.sinOmega = Math.sin(omega)
+    this.coeff = 2 * this.cosOmega
   }
 
   /** Feed one audio sample (a number, normalized roughly to -1..1). */
@@ -46,8 +49,8 @@ export class Goertzel {
    * Normalized by sample count so block length doesn't change the scale.
    */
   power(): number {
-    const real = this.q1 - this.q2 * Math.cos((2 * Math.PI * this.targetFreq) / this.sampleRate)
-    const imag = this.q2 * Math.sin((2 * Math.PI * this.targetFreq) / this.sampleRate)
+    const real = this.q1 - this.q2 * this.cosOmega
+    const imag = this.q2 * this.sinOmega
     const mag = real * real + imag * imag
     const n = this.sampleCount || 1
     this.reset()

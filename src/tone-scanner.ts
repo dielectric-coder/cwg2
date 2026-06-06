@@ -27,18 +27,28 @@ export interface ToneScannerOptions {
 }
 
 export interface ScanResult {
-  /** Power at the currently strongest bin (use this for thresholding). */
+  /** Power at the currently strongest bin. */
   power: number
   /** Frequency of the strongest bin this block, Hz. */
   peakFreq: number
   /** The locked-on CW frequency once stable, or null while still searching. */
   lockedFreq: number | null
+  /**
+   * Whether this block carries a tone (the strongest bin clearly dominates the
+   * others). Level-independent — use this as the on/off decision, since it
+   * rejects broadband noise that an amplitude threshold would mistake for a tone.
+   */
+  hasSignal: boolean
 }
 
 export class ToneScanner {
   private detectors: Goertzel[]
   private freqs: number[]
   private lockedFreq: number | null = null
+  // Per-block scratch buffers, allocated once and reused so finishBlock does no
+  // per-block heap allocation (it runs 100x/sec).
+  private powers: number[]
+  private medianScratch: number[]
 
   // Lock logic: count how many consecutive signal-bearing blocks the same bin
   // (or an adjacent one) has dominated.
@@ -56,6 +66,8 @@ export class ToneScanner {
     this.freqs = []
     for (let f = min; f <= max; f += step) this.freqs.push(f)
     this.detectors = this.freqs.map((f) => new Goertzel(f, opts.sampleRate))
+    this.powers = new Array(this.detectors.length)
+    this.medianScratch = new Array(this.detectors.length)
   }
 
   /** Feed one audio sample to every detector. */
@@ -70,7 +82,7 @@ export class ToneScanner {
   finishBlock(): ScanResult {
     let bestIdx = 0
     let bestPower = -Infinity
-    const powers: number[] = new Array(this.detectors.length)
+    const powers = this.powers // reused buffer, refilled each block
     for (let i = 0; i < this.detectors.length; i++) {
       const p = this.detectors[i].power() // note: power() resets the detector
       powers[i] = p
@@ -92,8 +104,10 @@ export class ToneScanner {
     // the strongest bin to the MEDIAN bin power is level-independent, so detection
     // works the instant audio starts (no multi-second floor convergence) and the
     // lock can only build on genuinely tone-like blocks.
-    const sorted = powers.slice().sort((a, b) => a - b)
-    const median = sorted[sorted.length >> 1]
+    const scratch = this.medianScratch // reused buffer — no per-block allocation
+    for (let i = 0; i < powers.length; i++) scratch[i] = powers[i]
+    scratch.sort((a, b) => a - b)
+    const median = scratch[scratch.length >> 1]
     const hasSignal = bestPower > median * this.signalPeakRatio
 
     if (hasSignal) {
@@ -121,6 +135,7 @@ export class ToneScanner {
       power: bestPower,
       peakFreq: Math.round(peakFreq),
       lockedFreq: this.lockedFreq,
+      hasSignal,
     }
   }
 

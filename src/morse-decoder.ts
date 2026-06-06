@@ -54,9 +54,6 @@ export class MorseDecoder {
   private readonly onChar: (char: string) => void
   private readonly onProgress?: (partialSymbol: string) => void
 
-  // Tracks whether we've already emitted a word space for the current long gap.
-  private pendingLetter = false
-
   constructor(opts: DecoderOptions) {
     this.blocksPerSecond = opts.blocksPerSecond
     this.onChar = opts.onChar
@@ -105,7 +102,6 @@ export class MorseDecoder {
       // Boundary at 2x dot length sits between "1 unit" and "3 units".
       const isDash = lengthBlocks >= this.dotBlocks * 2
       this.currentSymbol += isDash ? '-' : '.'
-      this.pendingLetter = true
       this.adaptDotLength(lengthBlocks, isDash)
       this.onProgress?.(this.currentSymbol)
     } else {
@@ -116,8 +112,12 @@ export class MorseDecoder {
       if (lengthBlocks >= this.dotBlocks * 2 && lengthBlocks < this.dotBlocks * 5) {
         this.emitLetter()
       } else if (lengthBlocks >= this.dotBlocks * 5) {
+        // Word gap: emit the pending letter, then a space — but only if a letter
+        // actually preceded it. Emitting the space unconditionally produced a
+        // stray leading/double space when currentSymbol was already empty.
+        const hadLetter = this.currentSymbol.length > 0
         this.emitLetter()
-        if (this.pendingLetter === false) this.onChar(' ')
+        if (hadLetter) this.onChar(' ')
       }
     }
   }
@@ -126,7 +126,6 @@ export class MorseDecoder {
     if (this.currentSymbol.length === 0) return
     this.onChar(decodeSymbol(this.currentSymbol))
     this.currentSymbol = ''
-    this.pendingLetter = false
     this.onProgress?.('') // buffer cleared
   }
 

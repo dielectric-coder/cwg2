@@ -105,8 +105,21 @@ async function main() {
   })
 
   let peakPower = 1e-9
+  let idleBlocks = 0 // consecutive blocks with no tone present (peakiness false)
   let sampleBuffer: number[] = []
   const onHistory: boolean[] = [] // last 3 raw on/off decisions, for debouncing
+  // After this many blocks with no real tone, treat the transmission as paused:
+  // flush the final letter and stop feeding, so post-transmission noise isn't
+  // decoded. 2.5 s is well beyond any inter-word gap (a 5 wpm word gap is ~1.7 s).
+  const MAX_IDLE_BLOCKS = blocksPerSecond * 2.5
+
+  /** Clear per-session capture state so a fresh start never inherits stale data. */
+  function resetCapture() {
+    sampleBuffer = []
+    onHistory.length = 0
+    peakPower = 1e-9
+    idleBlocks = 0
+  }
 
   function processBlock() {
     for (const s of sampleBuffer) scanner.process(s)
@@ -114,10 +127,19 @@ async function main() {
     sampleBuffer = []
 
     lockedFreq = res.lockedFreq
-    peakPower = Math.max(res.power, peakPower * 0.999)
-    const threshold = peakPower * 0.25
-    const rawOn = res.power > threshold
-    if (rawOn) searchingFreq = res.peakFreq // live pitch readout while still searching
+    // The on/off decision is amplitude-relative (clean element timing), but the
+    // threshold reference is adapted ONLY from real tone blocks (hasSignal). A loud
+    // non-tone transient (cough/tap) is not spectrally peaky, so it can't ratchet
+    // peakPower up and then suppress real tones for seconds while it decays.
+    if (res.hasSignal) {
+      peakPower = Math.max(res.power, peakPower * 0.999)
+      searchingFreq = res.peakFreq // live pitch readout while still searching
+      idleBlocks = 0
+    } else {
+      peakPower *= 0.999
+      idleBlocks++
+    }
+    const rawOn = res.power > peakPower * 0.25
 
     // Median-of-3 debounce: drop single-block glitches before the decoder times
     // them, so a stray on/off blip can't be mistaken for a very fast dot.
@@ -125,9 +147,14 @@ async function main() {
     if (onHistory.length > 3) onHistory.shift()
     const on = onHistory.filter(Boolean).length >= 2
 
-    // Only decode once the pitch is locked. Feeding pre-lock noise to the timing
-    // engine is what made the WPM estimate spike (~75) before settling.
-    if (res.lockedFreq !== null) decoder.pushBlock(on)
+    // Decode only once locked, and only while a tone has been present recently.
+    // After a sustained absence of any tone (operator stopped) flush the final
+    // letter once and stop feeding — otherwise post-transmission noise that crosses
+    // the threshold would be timed as Morse forever (the lock never releases).
+    if (res.lockedFreq !== null) {
+      if (idleBlocks <= MAX_IDLE_BLOCKS) decoder.pushBlock(on)
+      else if (idleBlocks === MAX_IDLE_BLOCKS + 1) decoder.flush()
+    }
   }
 
   // When the app comes to the foreground the host emits a one-time event that is
@@ -176,7 +203,7 @@ async function main() {
         partialSymbol = ''
         lockedFreq = null
         searchingFreq = null
-        onHistory.length = 0
+        resetCapture()
         void render()
         break
       case OsEventTypeList.FOREGROUND_EXIT_EVENT:
@@ -194,6 +221,7 @@ async function main() {
   }
 
   async function startListening() {
+    resetCapture() // start each session from a clean slate (no stale buffers)
     listening = true
     await bridge.audioControl(true)
     await render()
