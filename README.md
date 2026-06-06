@@ -1,79 +1,60 @@
 # G2 Morse Code Decoder
 
-An Even Realities G2 app: listens through the glasses microphone, automatically
-finds the CW tone pitch, decodes the Morse timing into text, and shows it on the
+An Even Realities G2 app that listens through the glasses microphone, automatically
+finds the CW (Morse) tone pitch, decodes the timing into text, and shows it on the
 display — including the dot/dash symbol being built live.
 
-## How it works (the pipeline)
+It decodes **audible** CW (a practice oscillator, speaker, or sidetone), not a
+digital tap into a radio.
 
 ```
-glasses mic ─PCM 16kHz─> pcm16ToFloat ─samples─> ToneScanner (auto-finds pitch)
-   ─per 10ms block─> threshold ─on/off─> MorseDecoder (timing) ─char─> display
+glasses mic ─PCM 16kHz─> pcm16ToFloat ─> ToneScanner (auto-finds pitch)
+   ─per 10ms block─> threshold ─on/off─> debounce ─> MorseDecoder ─char─> display
 ```
+
+## Quick start
+
+Self-contained vite project — runs on its own:
+
+```bash
+npm install
+npm run dev
+npx @evenrealities/evenhub-simulator http://localhost:5173
+```
+
+Tap once to start listening; play CW in the 600–900 Hz range into the mic.
+
+## Controls
+
+- **Single tap** — start / stop listening
+- **Double tap** — clear text and re-find the tone
 
 ## Files
 
 | File | Role | SDK? |
 | --- | --- | --- |
-| `goertzel.ts` | Detects energy at ONE frequency. Cheaper than an FFT. | No — pure math |
-| `tone-scanner.ts` | A BANK of Goertzels across 400–1000 Hz; auto-locks the CW pitch and interpolates between bins for sub-bin accuracy. | No — pure math |
+| `goertzel.ts` | Detects energy at one frequency (cheaper than an FFT). | No — pure math |
+| `tone-scanner.ts` | A bank of Goertzels over 550–950 Hz; detects a tone by spectral peakiness, locks the pitch, smooths the readout. | No — pure math |
 | `morse-table.ts` | Maps dot/dash strings to characters. | No — pure data |
-| `morse-decoder.ts` | The brain: tone on/off durations -> dots, dashes, gaps, letters, with adaptive speed and a live in-progress callback. | No — pure logic |
-| `main.ts` | Glue: captures audio, runs the pipeline, draws to the glasses, handles touch. | Yes — the only SDK file |
+| `morse-decoder.ts` | Tone on/off durations → dots, dashes, gaps, letters, with adaptive (clamped) speed and a live in-progress callback. | No — pure logic |
+| `main.ts` | Glue: audio capture, pipeline, display, touch. | Yes — the only SDK file |
 
-Keeping the logic SDK-free means you can unit-test it in plain Node — which is
-how this was verified: it decodes `HI BOB` and `SOS`, and auto-locks a 675 Hz
-tone (a pitch that isn't one of the 50 Hz scan bins) via interpolation between
-the 650/700 bins. See `decoder.test.ts` (`npx tsx decoder.test.ts`).
+Keeping the DSP/decode logic SDK-free means it's unit-tested in plain Node
+(`npx tsx src/decoder.test.ts`, `npx tsx src/tuning.test.ts`).
 
-## What's new vs the first version
+## Documentation
 
-- **Automatic tone detection** — no more hand-set `TONE_FREQ`. The scanner runs
-  detectors across 400–1000 Hz, locks onto whichever pitch is consistently
-  loudest (only while real signal is present, so silence gaps don't reset it),
-  and uses parabolic interpolation to read the true pitch between bins.
-- **Live in-progress symbol** — the decoder fires `onProgress` as each dot/dash
-  lands, so the display shows e.g. `> .-` before it resolves to a letter.
+- **[USER-GUIDE.md](USER-GUIDE.md)** — using the app: controls, reading the display,
+  getting good results, troubleshooting.
+- **[DEV-GUIDE.md](DEV-GUIDE.md)** — architecture, build/run, testing, the verified
+  SDK/event contract, tuning knobs, headless simulator automation.
+- **[HANDOFF.md](HANDOFF.md)** — what's verified vs. assumed, and the prioritized
+  open work.
+- **[CLAUDE.md](CLAUDE.md)** — guidance for Claude Code working in this repo.
 
-## Controls
+## Status
 
-- **Single press** — start / stop listening
-- **Double press** — clear text and re-arm tone detection
-
-## Setup
-
-Drop all five `.ts` files into your `src/` folder (replacing the existing
-`main.ts`), then:
-
-```bash
-npm run dev
-npx evenhub-simulator http://localhost:5173
-```
-
-## Tuning
-
-- Scan range / step in `main.ts` (`minFreq`, `maxFreq`, `stepFreq`) — wider or
-  finer detection vs. more CPU. 50 Hz step over 400–1000 Hz is a good default.
-- `lockStreak` in `tone-scanner.ts` — how many signal blocks must agree before
-  locking a pitch (lower = faster lock, more jitter).
-- Threshold fraction (`peakPower * 0.25`) in `main.ts` — lower for weak signals.
-- `alpha` in `morse-decoder.ts` — how fast the WPM estimate adapts.
-
-## Reality check
-
-The mic hears **acoustic** sound, so this decodes audible CW — a practice
-oscillator, a speaker, or a key's sidetone — not a digital tap into a radio's
-audio path.
-
-## Testing the logic without hardware
-
-Synthesize a tone, run it through `ToneScanner` + `MorseDecoder`, and assert the
-output in plain Node (`npx tsx your-test.ts`). All shipped logic was validated
-this way under TypeScript strict mode.
-
-## Possible next steps
-
-- Separate noise-floor tracking for the on/off threshold (not just peak decay).
-- Smoothing on the tone decision to reject single-block clicks.
-- Show the last decoded letter alongside the live symbol.
-- Per-source handling (decode only when the glasses, not the R1 ring, is tapped).
+Working and verified in the evenhub simulator: touch handling, live decoding, fast
+and stable tone lock, steady frequency readout, and a clamped WPM estimate. The
+SDK/event contract and the tone/decoder tuning are simulator-verified; confirming
+them on physical glasses is the main open step (see HANDOFF.md).

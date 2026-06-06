@@ -3,6 +3,10 @@
 A briefing for continuing this project in Claude Code. Read this first; it
 captures the architecture, what's verified vs. assumed, and the open work.
 
+Companion docs: [DEV-GUIDE.md](DEV-GUIDE.md) (build/run, testing, SDK contract,
+tuning), [USER-GUIDE.md](USER-GUIDE.md) (end-user), [README.md](README.md)
+(overview), [CLAUDE.md](CLAUDE.md) (Claude Code guidance).
+
 ## What this app does
 
 Listens through the Even Realities G2 microphone, auto-detects the CW tone
@@ -21,7 +25,7 @@ glasses mic ─PCM 16kHz─> pcm16ToFloat ─samples─> ToneScanner (auto-finds
 | File | Role | Touches SDK? |
 | --- | --- | --- |
 | `goertzel.ts` | Single-frequency energy detector (cheaper than an FFT). | No |
-| `tone-scanner.ts` | Bank of Goertzels over 400–1000 Hz; auto-locks the pitch, interpolates between bins. | No |
+| `tone-scanner.ts` | Bank of Goertzels over 550–950 Hz; detects a tone by spectral peakiness, auto-locks the pitch, interpolates between bins, smooths the locked value. | No |
 | `morse-table.ts` | Dot/dash string -> character lookup. | No |
 | `morse-decoder.ts` | Timing brain: durations -> dots/dashes/gaps/letters, adaptive WPM, live `onProgress`. | No |
 | `main.ts` | Glue: audio capture, pipeline wiring, display, touch/lifecycle. | **Yes — only this one** |
