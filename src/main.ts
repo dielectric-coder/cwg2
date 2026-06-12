@@ -22,15 +22,33 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { CwPipeline } from './pipeline'
-import { getTextWidth } from '@evenrealities/pretext'
 
-// TextContainerProperty has no text-alignment field, so we center a line by
-// left-padding it with spaces sized to the proportional glasses font, using the
-// pixel widths from @evenrealities/pretext (matches the firmware LVGL renderer).
+// TextContainerProperty has no text-alignment field, so we center the status line
+// by left-padding it with spaces sized to the proportional glasses font.
+//
+// CHAR_WIDTH is the pixel advance of every glyph the status line can contain
+// (digits, the words LISTENING/PAUSED, the pitch/wpm readouts and their
+// punctuation), measured once against the firmware LVGL font with
+// @evenrealities/pretext's getTextWidth. We bake the table rather than import
+// pretext at runtime so the bundle stays ~35KB instead of ~67KB.
+// KERNING_PER_GAP corrects the small per-pair overlap that a naive per-char sum
+// misses; the result matches pretext to within one space (5px) across the whole
+// status-string range. If the status text gains new characters, add their widths
+// here (getTextWidth('<char>')).
+const CHAR_WIDTH: Record<string, number> = {
+  ' ': 5, '~': 16, '.': 5,
+  '0': 12, '1': 8, '2': 12, '3': 12, '4': 13, '5': 12, '6': 12, '7': 13, '8': 12, '9': 12,
+  L: 10, I: 6, S: 12, T: 12, E: 11, N: 12, G: 12, H: 12, P: 12, A: 14, U: 12, D: 12,
+  z: 10, l: 4, o: 11, c: 11, k: 10, i: 4, n: 11, g: 11, f: 10, d: 11, t: 8, e: 11,
+  w: 16, p: 11, m: 16,
+}
 const INNER_WIDTH = 576 - 2 * 4 // container width minus paddingLength on both sides
-const SPACE_WIDTH = getTextWidth(' ')
+const SPACE_WIDTH = CHAR_WIDTH[' ']
+const KERNING_PER_GAP = 0.4
 function centerLine(text: string): string {
-  const lead = Math.max(0, Math.round((INNER_WIDTH - getTextWidth(text)) / 2 / SPACE_WIDTH))
+  let width = -KERNING_PER_GAP * Math.max(0, text.length - 1)
+  for (const ch of text) width += CHAR_WIDTH[ch] ?? SPACE_WIDTH
+  const lead = Math.max(0, Math.round((INNER_WIDTH - width) / 2 / SPACE_WIDTH))
   return ' '.repeat(lead) + text
 }
 
