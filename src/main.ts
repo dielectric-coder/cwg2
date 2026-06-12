@@ -90,7 +90,11 @@ async function main() {
       ? centerLine(`LISTENING  ${pitch}  ~${pipeline.estimatedWpm}wpm`)
       : centerLine('PAUSED')
     const body = decodedText.length ? decodedText : '(nothing yet)'
-    const live = partialSymbol ? `\n\n> ${partialSymbol}` : ''
+    // The in-progress dot/dash line starts in the same column as the centered
+    // status text (its leading-space count), so it sits directly under the first
+    // letter of PAUSED/LISTENING and shifts with it.
+    const statusIndent = ' '.repeat(status.length - status.trimStart().length)
+    const live = partialSymbol ? `\n\n${statusIndent}${partialSymbol}` : ''
     return `${status}\n\n${body}${live}`
   }
 
