@@ -44,6 +44,13 @@ export class MorseDecoder {
   private runBlocks = 0 // length of the current on-or-off run, in blocks
   private currentSymbol = '' // dots/dashes accumulated for the current letter
 
+  // Per-OFF-gap servicing: a gap is classified as it GROWS (each block), not only
+  // when the next tone ends it, so a long pause reveals the finished letter at once.
+  // These flags make each boundary fire at most once per gap (idempotent).
+  private gapLetterEmitted = false
+  private gapSpaceEmitted = false
+  private gapHadLetter = false
+
   // Adaptive dot length, expressed in BLOCKS (not seconds), clamped to the
   // [maxWpm..minWpm] speed band so a burst of noisy short pulses can't slam the
   // estimate to an absurd speed.
@@ -76,51 +83,68 @@ export class MorseDecoder {
   pushBlock(isTone: boolean): void {
     if (isTone === this.toneActive) {
       this.runBlocks++
-      return
+    } else {
+      // State just flipped. An ON run that ended is now a finished element; an OFF
+      // run starting is a fresh gap whose servicing flags reset.
+      if (this.toneActive) this.finishOnRun(this.runBlocks)
+      this.toneActive = isTone
+      this.runBlocks = 1
+      if (!isTone) this.resetGapState()
     }
-    // State just flipped — the run that ended describes one element/gap.
-    this.finishRun(this.toneActive, this.runBlocks)
-    this.toneActive = isTone
-    this.runBlocks = 1
+    // While the tone is OFF, classify the growing gap the moment it crosses the
+    // letter/word thresholds — don't wait for the next element. This is what makes
+    // a long pause show the just-finished letter (and word space) immediately.
+    if (!this.toneActive) this.serviceGap(this.runBlocks)
   }
 
   /** Call when audio stops, to flush any buffered letter and reset run state. */
   flush(): void {
-    if (this.toneActive) this.finishRun(true, this.runBlocks)
+    if (this.toneActive) this.finishOnRun(this.runBlocks)
     this.emitLetter()
     // Always clear the run accounting, even if we were mid-OFF-run, so a later
     // resume (start after stop, without a double-press) doesn't continue counting
     // a stale gap into its first measurement.
     this.toneActive = false
     this.runBlocks = 0
+    this.resetGapState()
   }
 
-  private finishRun(wasTone: boolean, lengthBlocks: number): void {
+  /**
+   * Classify a finished ON run as a dot or dash and append it to the current
+   * letter. Boundary at 2x dot length sits between "1 unit" and "3 units".
+   */
+  private finishOnRun(lengthBlocks: number): void {
     if (lengthBlocks <= 0) return
+    const isDash = lengthBlocks >= this.dotBlocks * 2
+    this.currentSymbol += isDash ? '-' : '.'
+    this.adaptDotLength(lengthBlocks, isDash)
+    this.onProgress?.(this.currentSymbol)
+  }
 
-    if (wasTone) {
-      // An ON run: classify as dot or dash against the adaptive threshold.
-      // Boundary at 2x dot length sits between "1 unit" and "3 units".
-      const isDash = lengthBlocks >= this.dotBlocks * 2
-      this.currentSymbol += isDash ? '-' : '.'
-      this.adaptDotLength(lengthBlocks, isDash)
-      this.onProgress?.(this.currentSymbol)
-    } else {
-      // An OFF run: classify the gap.
-      // < 2 units  -> intra-letter gap, do nothing (same letter continues)
-      // 2..5 units -> letter boundary
-      // >= 5 units -> word boundary
-      if (lengthBlocks >= this.dotBlocks * 2 && lengthBlocks < this.dotBlocks * 5) {
-        this.emitLetter()
-      } else if (lengthBlocks >= this.dotBlocks * 5) {
-        // Word gap: emit the pending letter, then a space — but only if a letter
-        // actually preceded it. Emitting the space unconditionally produced a
-        // stray leading/double space when currentSymbol was already empty.
-        const hadLetter = this.currentSymbol.length > 0
-        this.emitLetter()
-        if (hadLetter) this.onChar(' ')
-      }
+  /**
+   * Classify the current OFF gap by its length-so-far, firing each boundary at
+   * most once as the gap grows:
+   *   < 2 units  -> intra-letter gap, do nothing (same letter continues)
+   *   >= 2 units -> letter boundary: emit the pending letter
+   *   >= 5 units -> word boundary: also emit a space (only if a letter preceded it,
+   *                 so a leading/empty gap never produces a stray or doubled space)
+   */
+  private serviceGap(lengthBlocks: number): void {
+    if (!this.gapLetterEmitted && lengthBlocks >= this.dotBlocks * 2) {
+      this.gapHadLetter = this.currentSymbol.length > 0
+      this.emitLetter() // no-op if nothing is pending
+      this.gapLetterEmitted = true
     }
+    if (!this.gapSpaceEmitted && lengthBlocks >= this.dotBlocks * 5) {
+      if (this.gapHadLetter) this.onChar(' ')
+      this.gapSpaceEmitted = true
+    }
+  }
+
+  private resetGapState(): void {
+    this.gapLetterEmitted = false
+    this.gapSpaceEmitted = false
+    this.gapHadLetter = false
   }
 
   private emitLetter(): void {

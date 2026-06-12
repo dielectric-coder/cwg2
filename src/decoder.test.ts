@@ -323,6 +323,24 @@ assertNear(r600.lockedFreq, 600, 30, 'auto-locks ~600 Hz')
     'a letter gap emits no space')
 }
 
+// --- Tests: a pause shows the finished letter immediately (no wait for next element) ---
+// While listening, finishing a letter and then pausing must reveal that letter at
+// once — the gap should be classified as it grows, not held until the next tone
+// arrives (or the multi-second idle flush). Regression for the real-radio report:
+// "if there is a longer pause the last letter doesn't show up till sending restarts".
+{
+  const U = UNIT_15WPM
+  let out = ''
+  const d = new MorseDecoder({ blocksPerSecond: BLOCKS_PER_SECOND, initialWpm: 15, onChar: (c) => (out += c) })
+  for (let i = 0; i < U; i++) d.pushBlock(true) // a dot -> "E"
+  for (let i = 0; i < 3 * U; i++) d.pushBlock(false) // ~3 units of pause (a letter gap), NO next element
+  assertEqual(out, 'E', 'a pause reveals the just-finished letter immediately (not held until the next element)')
+  for (let i = 0; i < 3 * U; i++) d.pushBlock(false) // keep pausing, now past a word gap
+  assertEqual(out, 'E ', 'continuing the pause past a word gap emits exactly one trailing space')
+  d.flush()
+  assertEqual(out, 'E ', 'flush after a fully-serviced pause adds nothing (no duplicate letter/space)')
+}
+
 // --- Summary ---
 console.log(`\n${failures === 0 ? 'ALL TESTS PASSED' : `${failures} TEST(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
