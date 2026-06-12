@@ -1,0 +1,14 @@
+{
+  "package_id": "ca.dielectriccoder.cwg2",
+  "edition": "202601",
+  "name": "CW Decoder",
+  "version": "0.9.1",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.10",
+  "supported_languages": ["en"],
+  "tagline": "Morse code decoder for CW radio",
+  "description": "Listens through the G2 mic, auto-detects the CW tone pitch, decodes Morse timing into text, and renders it live on the display. Tap to start/stop, double-tap to clear and re-arm.",
+  "author": "michel",
+  "entrypoint": "index.html",
+  "permissions": []
+}
