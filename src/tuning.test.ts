@@ -209,5 +209,38 @@ console.log('\n# Robustness')
   assert(decoded.includes('PARIS'), 'a second session after resetCapture decodes cleanly', `got "${decoded.trim()}"`)
 }
 
+// --- #4: the locked-pitch READOUT is steady on a stable carrier ---
+// A dead-stable tone still jitters block-to-block: noise and partial on/off edge
+// blocks perturb the parabolic bin interpolation, so the raw peak estimate wanders
+// several Hz. The *reported* lock must not — a readout that flickers 798/801/799
+// looks broken even though the tone never moved. Mirrors the real complaint:
+// ARRL practice file, steady 800 Hz @ 25 WPM. We record the reported pitch every
+// block once locked and require a tight spread after the EWMA has settled.
+console.log('\n# Readout stability')
+{
+  const STABLE_FREQ = 800
+  // Long stream so we observe many post-lock blocks across on/off keying.
+  const samples = buildSamples(
+    'PARIS PARIS PARIS PARIS PARIS PARIS PARIS PARIS PARIS PARIS',
+    WPM, STABLE_FREQ, 12, 'brown', 7777,
+  )
+  const pipe = new CwPipeline({ onChar: () => {} })
+  const nBlocks = Math.floor(samples.length / BLOCK_SAMPLES)
+  const reported: number[] = []
+  for (let b = 0; b < nBlocks; b++) {
+    pipe.pushSamples(samples.slice(b * BLOCK_SAMPLES, (b + 1) * BLOCK_SAMPLES))
+    if (pipe.lockedFreq !== null) reported.push(pipe.lockedFreq)
+  }
+  const settled = reported.slice(30) // drop the initial EWMA settling window
+  const min = Math.min(...settled), max = Math.max(...settled)
+  const center = (min + max) / 2
+  console.log(
+    `-- stable ${STABLE_FREQ}Hz: reported range ${min}..${max}Hz ` +
+      `(${new Set(settled).size} distinct) over ${settled.length} post-lock blocks`,
+  )
+  assert(max - min <= 1, 'locked readout holds steady (≤1 Hz spread) on a stable tone', `spread ${min}..${max}Hz`)
+  assert(Math.abs(center - STABLE_FREQ) <= 15, `locked readout is accurate (~${STABLE_FREQ} Hz)`, `center ${center}Hz`)
+}
+
 console.log(`\n${failures === 0 ? 'ALL TUNING TESTS PASSED' : `${failures} TUNING TEST(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

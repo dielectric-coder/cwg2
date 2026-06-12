@@ -44,7 +44,22 @@ export interface ScanResult {
 export class ToneScanner {
   private detectors: Goertzel[]
   private freqs: number[]
+  // The REPORTED pitch: a stable integer Hz shown to the user. Held steady by
+  // hysteresis (see reportDeadband) so a dead-stable tone reads as one number.
   private lockedFreq: number | null = null
+  // The float EWMA state behind it. Kept unrounded so re-rounding the smoothed
+  // value each block can't feed quantization noise back in and dither the lock.
+  private lockedFreqSmooth = 0
+  // EWMA weight on each new (noisy) per-block estimate. Low -> very steady readout;
+  // 0.03 (~0.3 s time constant at 100 blocks/s) keeps the smoothed pitch from
+  // wandering across an integer boundary on a stable tone. Tuned together with
+  // reportDeadband in tuning.test.ts (the "readout stability" case) so a dead-stable
+  // carrier reports a single number.
+  private readonly lockEwmaAlpha = 0.03
+  // The smoothed estimate must drift at least this far from the reported value
+  // before the readout moves, so sub-Hz wander around an integer boundary (e.g.
+  // 799.6 <-> 800.4) can't flicker it. A genuine pitch change still pulls it across.
+  private readonly reportDeadband = 3
   // Per-block scratch buffers, allocated once and reused so finishBlock does no
   // per-block heap allocation (it runs 100x/sec).
   private powers: number[]
@@ -132,11 +147,19 @@ export class ToneScanner {
         // raw (noisy) estimate. A stable tone still jitters block-to-block —
         // partial on/off blocks at element edges and noise perturb the parabolic
         // interpolation — so without smoothing the display flickers across tens of
-        // Hz. An EWMA converges to the true pitch and holds it steady.
-        this.lockedFreq =
-          this.lockedFreq === null
-            ? Math.round(peakFreq)
-            : Math.round(this.lockedFreq * 0.9 + peakFreq * 0.1)
+        // Hz. The EWMA runs on the unrounded float (lockedFreqSmooth); rounding only
+        // happens for the reported value, and only when the smoothed estimate has
+        // moved past reportDeadband, so the readout converges and then holds.
+        if (this.lockedFreq === null) {
+          this.lockedFreqSmooth = peakFreq
+          this.lockedFreq = Math.round(peakFreq)
+        } else {
+          this.lockedFreqSmooth =
+            this.lockedFreqSmooth * (1 - this.lockEwmaAlpha) + peakFreq * this.lockEwmaAlpha
+          if (Math.abs(this.lockedFreqSmooth - this.lockedFreq) >= this.reportDeadband) {
+            this.lockedFreq = Math.round(this.lockedFreqSmooth)
+          }
+        }
       }
     }
 
@@ -167,6 +190,7 @@ export class ToneScanner {
   /** Forget the current lock (e.g. when the user clears or signal drops). */
   resetLock(): void {
     this.lockedFreq = null
+    this.lockedFreqSmooth = 0
     this.lastWinner = -1
     this.winnerStreak = 0
   }
