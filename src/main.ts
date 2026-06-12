@@ -22,6 +22,17 @@ import {
 } from '@evenrealities/even_hub_sdk'
 
 import { CwPipeline } from './pipeline'
+import { getTextWidth } from '@evenrealities/pretext'
+
+// TextContainerProperty has no text-alignment field, so we center a line by
+// left-padding it with spaces sized to the proportional glasses font, using the
+// pixel widths from @evenrealities/pretext (matches the firmware LVGL renderer).
+const INNER_WIDTH = 576 - 2 * 4 // container width minus paddingLength on both sides
+const SPACE_WIDTH = getTextWidth(' ')
+function centerLine(text: string): string {
+  const lead = Math.max(0, Math.round((INNER_WIDTH - getTextWidth(text)) / 2 / SPACE_WIDTH))
+  return ' '.repeat(lead) + text
+}
 
 async function main() {
   const bridge = await waitForEvenAppBridge()
@@ -54,14 +65,12 @@ async function main() {
       : pipeline.searchingFreq
         ? `~${pipeline.searchingFreq}Hz locking...`
         : 'finding tone...'
-    // 'PAUSED' centered in the container's 568px inner width (576 − 2×4 padding):
-    // 50 leading spaces ≈ (568 − 69) / 2 / 5, where 69px is the rendered width of
-    // 'PAUSED' and 5px a space, per @evenrealities/pretext font metrics. LISTENING
-    // stays left-aligned — its live pitch/wpm readout changes width and would
-    // jitter horizontally if centered.
+    // Status line is centered in both states. The LISTENING readout shifts
+    // slightly as the pitch/wpm digits change width — that's inherent to centering
+    // a variable-width line.
     const status = listening
-      ? `LISTENING  ${pitch}  ~${pipeline.estimatedWpm}wpm`
-      : `${' '.repeat(50)}PAUSED`
+      ? centerLine(`LISTENING  ${pitch}  ~${pipeline.estimatedWpm}wpm`)
+      : centerLine('PAUSED')
     const body = decodedText.length ? decodedText : '(nothing yet)'
     const live = partialSymbol ? `\n\n> ${partialSymbol}` : ''
     return `${status}\n\n${body}${live}`
