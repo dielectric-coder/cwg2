@@ -104,7 +104,8 @@ async function main() {
   }
   async function flushRenders(): Promise<void> {
     try {
-      while (renderDirty) {
+      let passes = 0
+      while (renderDirty && ++passes <= 5) {
         renderDirty = false
         await render()
       }
@@ -126,7 +127,9 @@ async function main() {
     // Audio path. Payload field is audioEvent.audioPcm (s16le PCM as number[] or
     // base64 over the JSON bridge), not .data.
     if (event.audioEvent && listening) {
-      pipeline.pushSamples(pcm16ToFloat(event.audioEvent.audioPcm ?? event.audioEvent.data))
+      const raw = event.audioEvent.audioPcm ?? event.audioEvent.data
+      if (raw == null) return // guard: SDK may send an audioEvent with neither field
+      pipeline.pushSamples(pcm16ToFloat(raw))
       return
     }
 
@@ -136,14 +139,16 @@ async function main() {
     // whichever envelope is present and normalize it.
     const item = event.sysEvent ?? event.textEvent
     if (!item) return
-    const evt = OsEventTypeList.fromJson(item.eventType)
+    const evt = item.eventType != null
+      ? OsEventTypeList.fromJson(item.eventType)
+      : undefined
 
     // Ignore the launch foreground event (see STARTUP_GRACE_MS above).
     if (evt === undefined && event.sysEvent && Date.now() - readyAt < STARTUP_GRACE_MS) return
 
     switch (evt ?? OsEventTypeList.CLICK_EVENT) {
       case OsEventTypeList.CLICK_EVENT:
-        void toggleListening()
+        void toggleListening().catch((e) => console.error('toggle failed', e))
         break
       case OsEventTypeList.DOUBLE_CLICK_EVENT:
         // reArm() flushes the pending letter (via onChar) then drops the lock and
@@ -157,7 +162,7 @@ async function main() {
       case OsEventTypeList.FOREGROUND_EXIT_EVENT:
       case OsEventTypeList.ABNORMAL_EXIT_EVENT:
       case OsEventTypeList.SYSTEM_EXIT_EVENT:
-        void stopListening()
+        void stopListening().catch((e) => console.error('exit cleanup failed', e))
         break
       // SCROLL_TOP / SCROLL_BOTTOM / IMU: ignored
     }
@@ -170,14 +175,23 @@ async function main() {
 
   async function startListening() {
     pipeline.resetCapture() // start each session from a clean slate (no stale state)
-    listening = true
-    await bridge.audioControl(true)
+    try {
+      await bridge.audioControl(true)
+      listening = true
+    } catch (e) {
+      console.error('failed to start audio', e)
+      return
+    }
     scheduleRender()
   }
 
   async function stopListening() {
     listening = false
-    await bridge.audioControl(false)
+    try {
+      await bridge.audioControl(false)
+    } catch (e) {
+      console.error('failed to stop audio', e)
+    }
     pipeline.flush()
     scheduleRender()
   }

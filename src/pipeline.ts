@@ -88,7 +88,7 @@ export class CwPipeline {
   private processBlock(): void {
     for (const s of this.sampleBuffer) this.scanner.process(s)
     const res = this.scanner.finishBlock()
-    this.sampleBuffer = []
+    this.sampleBuffer.length = 0 // reuse the array — avoids GC churn at 100 blocks/sec
 
     this.lockedFreq = res.lockedFreq
     // The on/off decision is amplitude-relative (clean element timing), but the
