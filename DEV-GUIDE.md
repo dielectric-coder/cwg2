@@ -22,6 +22,19 @@ npm run build                                # tsc + vite production build
 To run on real glasses, serve the dev/build and load it via the evenhub CLI / QR
 flow (see the SDK docs linked in HANDOFF.md).
 
+### Versioning
+
+`package.json` is the **single source of truth** for the version. `scripts/sync-version.mjs`
+copies it into `app.json` (the Even Hub manifest) and the `**Version:**` line of each
+doc, so they never drift. It runs automatically as `prebuild` (every `npm run build`)
+and as the `version` lifecycle hook, so the normal way to bump is:
+
+```bash
+npm version patch   # (or minor / major) -> bumps package.json, syncs app.json + docs, commits
+```
+
+Run `npm run sync-version` by hand if you ever edit `package.json`'s version directly.
+
 ## Architecture
 
 ```

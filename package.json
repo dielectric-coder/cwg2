@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/sync-version.mjs",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync-version": "node scripts/sync-version.mjs",
+    "version": "node scripts/sync-version.mjs && git add app.json README.md HANDOFF.md USER-GUIDE.md DEV-GUIDE.md"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "^0.1.13",
