@@ -1,6 +1,6 @@
 # G2 Morse Code Decoder
 
-**Version:** 0.9.8
+**Version:** 0.9.9
 
 An Even Realities G2 app that listens through the glasses microphone, automatically
 finds the CW (Morse) tone pitch, decodes the timing into text, and shows it on the
@@ -28,8 +28,9 @@ Tap once to start listening; play CW in the 600–900 Hz range into the mic.
 
 ## Controls
 
-- **Single tap** — start / stop listening
-- **Double tap** — clear text and re-find the tone
+- **Tap** — start / stop listening
+- **Swipe** — clear text and re-find the tone
+- **Double tap** — exit (a confirmation dialog appears)
 
 ## Files
 

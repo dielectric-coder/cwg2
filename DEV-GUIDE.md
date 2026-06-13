@@ -1,6 +1,6 @@
 # Developer Guide — G2 CW Decoder
 
-**Version:** 0.9.8
+**Version:** 0.9.9
 
 How the app is built, how to run and test it, and the contracts to respect when
 changing it. For end-user instructions see [USER-GUIDE.md](USER-GUIDE.md); for the

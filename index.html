@@ -4,10 +4,83 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>cw-g2</title>
+    <title>CW Decoder</title>
+    <style>
+      /* Even design tokens (phone-side WebView). Never use the glasses green here. */
+      :root {
+        --color-text: #232323;
+        --color-text-dim: #7b7b7b;
+        --color-bg: #ffffff;
+        --color-surface: #eeeeee;
+        --color-accent: #fef991;
+        --hairline: rgba(35, 35, 35, 0.08);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --color-text: #ffffff;
+          --color-text-dim: #8a8a8a;
+          --color-bg: #111111;
+          --color-surface: #1a1a1a;
+          --hairline: rgba(255, 255, 255, 0.08);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px;
+        font-family: 'FK Grotesk Neue', system-ui, -apple-system, 'Source Han Sans', sans-serif;
+        background: var(--color-bg);
+        color: var(--color-text);
+        letter-spacing: -0.01em;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap { max-width: 560px; margin: 0 auto; }
+      h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 4px; }
+      .tagline { font-size: 16px; color: var(--color-text-dim); margin: 0 0 24px; }
+      .card { background: var(--color-surface); border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+      .label {
+        font-size: 11px; font-weight: 500; letter-spacing: 0.04em;
+        text-transform: uppercase; color: var(--color-text-dim); margin: 0 0 8px;
+      }
+      .state { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+      .meta { font-size: 13px; color: var(--color-text-dim); margin: 4px 0 0; }
+      .decoded {
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+        font-size: 16px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+        margin: 12px 0 0; min-height: 1.5em;
+      }
+      .decoded .live { color: var(--color-text-dim); }
+      .decoded:empty::before { content: '—'; color: var(--color-text-dim); }
+      ul.controls { list-style: none; padding: 0; margin: 0; }
+      ul.controls li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; font-size: 16px; }
+      ul.controls li + li { border-top: 1px solid var(--hairline); }
+      ul.controls .action { color: var(--color-text-dim); text-align: right; }
+      .footnote { font-size: 13px; color: var(--color-text-dim); text-align: center; margin: 24px 0 0; }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div class="wrap">
+      <h1>CW Decoder</h1>
+      <p class="tagline">Morse code decoder for CW radio</p>
+
+      <section class="card">
+        <p class="label">Status</p>
+        <p class="state" id="phone-state">Connecting…</p>
+        <p class="meta" id="phone-meta">Open this app on your glasses to begin.</p>
+        <p class="decoded" id="phone-decoded"></p>
+      </section>
+
+      <section class="card">
+        <p class="label">Controls (on the glasses touchpad)</p>
+        <ul class="controls">
+          <li><span>Tap</span><span class="action">Start / stop listening</span></li>
+          <li><span>Swipe</span><span class="action">Clear &amp; re-arm</span></li>
+          <li><span>Double-tap</span><span class="action">Exit</span></li>
+        </ul>
+      </section>
+
+      <p class="footnote">Decoded text appears live on your glasses display.</p>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 # User Guide — G2 CW Decoder
 
-**Version:** 0.9.8
+**Version:** 0.9.9
 
 This app turns your Even Realities G2 glasses into a **Morse code (CW) reader**. It
 listens through the glasses microphone, automatically finds the tone's pitch,
@@ -33,8 +33,9 @@ point your ear (the mic) toward the CW source.
 
 | Gesture | Action |
 | --- | --- |
-| **Single tap** | Start / stop listening |
-| **Double tap** | Clear the text and re-find the tone |
+| **Tap** | Start / stop listening |
+| **Swipe** | Clear the text and re-find the tone |
+| **Double tap** | Exit (a confirmation dialog appears) |
 
 The app starts **paused**. Tap once to begin listening.
 
@@ -72,7 +73,7 @@ CQ CQ DE W1AW                    ← decoded text (scrolls as more arrives)
 | Stuck on "finding tone..." | No tone in 600–900 Hz reaching the mic. Check the source is playing and audible, in band, and the mic isn't muted. |
 | Pitch reads a bit low/high vs. what you expect | Normal within ~±25–50 Hz — the pitch readout has limited resolution, and a weak signal or your audio setup can shift it. Raise the level for a closer reading. |
 | Speed wobbles by ±1 WPM | Expected. The estimate is quantized to the 10 ms timing grid; 25 WPM may read 24–26. |
-| Garbled letters at the very start | The first letter or two while it locks onto the tone can be wrong. It settles quickly; double-tap to clear and resync. |
+| Garbled letters at the very start | The first letter or two while it locks onto the tone can be wrong. It settles quickly; swipe to clear and resync. |
 | Wrong/extra characters | Usually noise or uneven timing. Improve the signal level, reduce noise, or feed steadier CW. |
 
 ## Known limitations

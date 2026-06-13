@@ -1,6 +1,6 @@
 # HANDOFF — G2 Morse Code Decoder
 
-**Version:** 0.9.8
+**Version:** 0.9.9
 
 A briefing for continuing this project in Claude Code. Read this first; it
 captures the architecture, what's verified vs. assumed, and the open work.
@@ -47,7 +47,8 @@ npm run dev                                   # vite (uses :5173, or next free p
 npx evenhub-simulator http://localhost:5173   # point at whatever port vite prints
 ```
 
-Controls: single press = start/stop, double press = clear text + re-arm tone detection.
+Controls: tap = start/stop, swipe = clear text + re-arm tone detection, double-tap =
+exit (`shutDownPageContainer(1)`, system confirmation dialog).
 
 ### Driving the simulator headlessly (handy for verifying touch/audio)
 

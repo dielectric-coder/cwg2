@@ -9,8 +9,9 @@
  * only does audio capture, display, and touch/lifecycle handling.
  *
  * Controls:
- *   - single press  -> start/stop listening
- *   - double press  -> clear text and re-arm tone detection
+ *   - tap         -> start/stop listening
+ *   - swipe       -> clear text and re-arm tone detection
+ *   - double-tap  -> exit (system confirmation dialog)
  */
 
 import {
@@ -98,7 +99,37 @@ async function main() {
     return `${status}\n\n${body}${live}`
   }
 
+  // ---- Phone-side WebView mirror ----
+  // The decode UI lives on the glasses; the phone WebView that hosts the plugin
+  // must not be blank (Even Hub design requirement), so we mirror the live state
+  // into the static page from index.html.
+  const phoneState = document.getElementById('phone-state')
+  const phoneMeta = document.getElementById('phone-meta')
+  const phoneDecoded = document.getElementById('phone-decoded')
+  function updatePhone(): void {
+    if (phoneState) phoneState.textContent = listening ? 'Listening' : 'Paused'
+    if (phoneMeta) {
+      phoneMeta.textContent = listening
+        ? pipeline.lockedFreq
+          ? `${pipeline.lockedFreq} Hz · ${pipeline.estimatedWpm} WPM`
+          : pipeline.searchingFreq
+            ? `~${pipeline.searchingFreq} Hz · locking…`
+            : 'Finding tone…'
+        : 'Tap the glasses touchpad to start listening.'
+    }
+    if (phoneDecoded) {
+      phoneDecoded.textContent = decodedText
+      if (partialSymbol) {
+        const live = document.createElement('span')
+        live.className = 'live'
+        live.textContent = (decodedText ? '  ' : '') + partialSymbol
+        phoneDecoded.appendChild(live)
+      }
+    }
+  }
+
   async function render() {
+    updatePhone() // cheap DOM sync; keep the phone page reflecting the latest state
     const content = buildContent()
     if (content === lastContent) return // skip redundant frames — no bridge round-trip
     lastContent = content
@@ -187,6 +218,14 @@ async function main() {
         void toggleListening().catch((e) => console.error('toggle failed', e))
         break
       case OsEventTypeList.DOUBLE_CLICK_EVENT:
+        // Even Hub convention: double-tap requests app exit. shutDownPageContainer(1)
+        // pops the system exit-confirmation dialog; if the user confirms, the host
+        // fires FOREGROUND_EXIT / SYSTEM_EXIT below and the actual teardown runs there.
+        void bridge.shutDownPageContainer(1).catch((e) => console.error('exit request failed', e))
+        break
+      case OsEventTypeList.SCROLL_TOP_EVENT:
+      case OsEventTypeList.SCROLL_BOTTOM_EVENT:
+        // Swipe (either direction) clears the text and re-arms tone detection.
         // reArm() flushes the pending letter (via onChar) then drops the lock and
         // capture state; clear our text buffers AFTER, so the flushed letter that
         // just landed in decodedText is wiped too.
@@ -200,7 +239,7 @@ async function main() {
       case OsEventTypeList.SYSTEM_EXIT_EVENT:
         void stopListening().catch((e) => console.error('exit cleanup failed', e))
         break
-      // SCROLL_TOP / SCROLL_BOTTOM / IMU: ignored
+      // IMU: ignored
     }
   })
 
