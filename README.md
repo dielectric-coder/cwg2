@@ -1,5 +1,7 @@
 # G2 Morse Code Decoder
 
+**Version:** 0.9.8
+
 An Even Realities G2 app that listens through the glasses microphone, automatically
 finds the CW (Morse) tone pitch, decodes the timing into text, and shows it on the
 display — including the dot/dash symbol being built live.

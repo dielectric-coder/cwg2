@@ -1,5 +1,7 @@
 # HANDOFF — G2 Morse Code Decoder
 
+**Version:** 0.9.8
+
 A briefing for continuing this project in Claude Code. Read this first; it
 captures the architecture, what's verified vs. assumed, and the open work.
 

@@ -1,5 +1,7 @@
 # Developer Guide — G2 CW Decoder
 
+**Version:** 0.9.8
+
 How the app is built, how to run and test it, and the contracts to respect when
 changing it. For end-user instructions see [USER-GUIDE.md](USER-GUIDE.md); for the
 verified-vs-assumed status and open work see [HANDOFF.md](HANDOFF.md).
@@ -152,7 +154,7 @@ asserting what the glasses display shows.
 | Scan range / step | `main.ts` → `ToneScanner({ minFreq: 550, maxFreq: 950, stepFreq: 25 })` | Detection band & pitch resolution vs. CPU |
 | `signalPeakRatio` | `tone-scanner.ts` | Peak/median ratio to call a block "signal" |
 | `lockStreak` | `tone-scanner.ts` | Signal blocks of agreement before locking |
-| Locked-freq smoothing | `tone-scanner.ts` (EWMA `0.9/0.1`) | Steadiness of the pitch readout |
+| Locked-freq smoothing | `tone-scanner.ts` (EWMA `lockEwmaAlpha` 0.03 + `reportDeadband` 3 Hz) | Steadiness of the pitch readout |
 | Decode threshold + debounce | `main.ts` → `peakPower * 0.25`, median-of-3 | On/off sensitivity & glitch rejection |
 | `minWpm` / `maxWpm` / `alpha` | `morse-decoder.ts` | WPM clamp band & adaptation rate |
 | `STARTUP_GRACE_MS` | `main.ts` | Window that ignores the launch tap event |

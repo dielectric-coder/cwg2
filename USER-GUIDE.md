@@ -1,5 +1,7 @@
 # User Guide — G2 CW Decoder
 
+**Version:** 0.9.8
+
 This app turns your Even Realities G2 glasses into a **Morse code (CW) reader**. It
 listens through the glasses microphone, automatically finds the tone's pitch,
 decodes the dots and dashes, and shows the text on the display as it arrives —
